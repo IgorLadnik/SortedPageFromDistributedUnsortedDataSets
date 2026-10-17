@@ -1,0 +1,398 @@
+<!--------------------------------------------------------------------------->  
+<!--                           INTRODUCTION                                
+
+ The Code Project article submission template (HTML version)
+
+Using this template will help us post your article sooner. To use, just 
+follow the 3 easy steps below:
+ 
+     1. Fill in the article description details
+     2. Add links to your images and downloads
+     3. Include the main article text
+
+That's all there is to it! All formatting will be done by our submission
+scripts and style sheets. 
+
+-->  
+<!--------------------------------------------------------------------------->  
+<!--                        IGNORE THIS SECTION                            -->
+<html>
+<head>
+<title>The Code Project</title>
+<Style>
+BODY, P, TD { font-family: Verdana, Arial, Helvetica, sans-serif; font-size: 10pt }
+H2,H3,H4,H5 { color: #ff9900; font-weight: bold; }
+H2 { font-size: 13pt; }
+H3 { font-size: 12pt; }
+H4 { font-size: 10pt; color: black; }
+PRE { BACKGROUND-COLOR: #FBEDBB; FONT-FAMILY: "Courier New", Courier, mono; WHITE-SPACE: pre; }
+CODE { COLOR: #990000; FONT-FAMILY: "Courier New", Courier, mono; }
+</style>
+<link rel="stylesheet" type=text/css href="http://www.codeproject.com/styles/global.css">
+</head>
+<body bgcolor="#FFFFFF" color=#000000>
+<!--------------------------------------------------------------------------->  
+
+
+<!-------------------------------     STEP 1      --------------------------->
+<!--  Fill in the details (CodeProject will reformat this section for you) -->
+
+<pre>
+Title:       <span lang="EN-US">Sorted Page from Unsorted Distributed Data</span>
+Author:      Igor Ladnik
+Email:       ladnik@hotmail.com
+Member ID:   47188
+Language:    C# 4.5 
+Platform:    Windows 10; .NET 4.5
+Technology:  Plain C#
+Level:       Beginning
+Description: <span lang="EN-US" style="line-height: 115%">Algorithm and code to create sorted page out of several large volatile unsorted data sets. </span></span>
+Section      General Programming - Algorithms & Recipes
+SubSection   Sorting
+License:     CPOL
+</pre>
+
+<!-------------------------------     STEP 2      --------------------------->
+<!--  Include download and sample image information.                       --> 
+
+<ul class=download>
+<li>
+<a href="MergeForPage_src.zip">Download source - 12 Kb</a></li>
+</ul>
+
+<p>&nbsp;</p>
+
+<!-- <p><img src="Article.gif" alt="Sample Image - maximum width is 600 pixels" width=400 height=200></p> -->
+
+
+
+<!-------------------------------     STEP 3      --------------------------->
+
+<!--  Add the article text. Please use simple formatting (<h2>, <p> etc)   --> 
+
+
+<h2>Problem Statement</h2>
+
+<p style="text-align: justify; background: white"><span lang="EN-US">
+Recently in my practical work I came across the following problem.
+</p>
+
+</p>
+<p style="text-align: justify; background: white"><span lang="EN-US">
+There are several Data Stores located in different worker machines, each of which has unsorted set of objects of the same type.  
+The sets are large and volatile meaning that items often are inserted to / removed from the sets (we control insertion / removal procedure).
+The system should response to the following query:
+<i>
+present in another Aggregator machine a page of <b><i>p</i></b> objects of merged sorted list of objects from all sets with some <b><i>offset</i></b> 
+from the beginning of the combined sorted list.  
+</i>
+<p style="text-align: justify; background: white"><span lang="EN-US">
+Such problem arises, for example, when user wants to see (either by pages or in scrollable table) sorted merged list of frequently 
+changed objects scattered over different computers.
+</p>
+
+<p style="text-align: justify; background: white"><span lang="EN-US">
+Straightforward solution to the problem is to 
+</p>
+<p style="text-align: justify; background: white"><span lang="EN-US">
+- copy and merge sets from all Data Stores to Aggregator machine,
+</p>
+<p style="text-align: justify; background: white"><span lang="EN-US">
+- sort the combined set to a global sorted list, and 
+</p>
+<p style="text-align: justify; background: white"><span lang="EN-US">
+- take <b><i>p</i></b>  objects starting with <b><i>offset</i></b> object.
+</p>
+
+<p style="text-align: justify; background: white"><span lang="EN-US">
+This naive solution does not suit to our case with large and frequently updated Data Stores 
+due to massive objects transfer from Data Stores to Aggregator on each query.
+A better solution should reduce number of transferred objects as much as possible. 
+</p>
+
+<p style="text-align: justify; background: white"><span lang="EN-US">
+Although the above problem looks fairly standard, I failed to find its documented solution in Internet, let alone its code implementation.
+</p>
+
+<h2>Solution</h2>
+
+<p style="text-align: justify; background: white"><span lang="EN-US">
+Proposed solution is following. Objects in all Data Stores are categorized according to some simple rules to certain <i>buckets</i>.
+Rules to place an object to a bucket are uniform for all Data Stores. Categorizing procedure should be relatively simple and inexpensive. 
+For example, if our objects are words then division to buckets may be done by the first or by two leading letters of the word. To solve our problem
+we 
+
+<p style="text-align: justify; background: white"><span lang="EN-US">
+<li>temporary freeze all Data Stores,</li>
+</p>
+<p style="text-align: justify; background: white"><span lang="EN-US">
+<li> Aggregator collects length of each bucket in all Data Stores,</li>
+</p>
+<p style="text-align: justify; background: white"><span lang="EN-US">
+<li> Aggregator calculates total number of objects in each bucket in all Data Storage, and </li>
+</p>
+<p style="text-align: justify; background: white"><span lang="EN-US">
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<b>S</b><sub><i>k</i></sub> - number of all objects in the first <i>k</i> buckets (numbers between <i>0</i> and <i>k - 1</i>) in all Data Stores.
+</p>
+<li> find bucket numbers <b>x</b> and <b>y</b> satisfying the following conditions:</li>
+<p style="text-align: justify; background: white"><span lang="EN-US">
+
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<b>S</b><sub><i>x</i></sub>&nbsp; &le; &nbsp;<b><i>offset</i></b>&nbsp; & &nbsp;<b>S</b><sub><i>x+1</i></sub>&nbsp; > &nbsp;<b><i>offset</i></b>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(1)
+
+
+
+</p>
+<p style="text-align: justify; background: white"><span lang="EN-US">
+
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<b>S</b><sub><i>y</i></sub>&nbsp; &le; &nbsp;<b><i>offset + p</i></b> &nbsp; & &nbsp;<b>S</b><sub><i>y+1</i></sub>&nbsp; > &nbsp;<b><i>offset + p</i></b>
+&nbsp;&nbsp;&nbsp;&nbsp;(2)
+
+
+</p>
+<p style="text-align: justify; background: white"><span lang="EN-US">
+<li> load content of buckets with numbers beween <b>x</b> and <b>y</b> inclusively from all Data Stores to Aggregator 
+(at this point Data Stores freeze may be lifted)
+</p>
+<p style="text-align: justify; background: white"><span lang="EN-US">
+<li> sort objects of each bucket from all Data Stores separately and </li>
+</p>
+<p style="text-align: justify; background: white"><span lang="EN-US">
+<li> compose final sorted list of all buckets and take a result page of
+<b><i>p</i></b> objects from the list starting from object number <b><i>a</i></b> where 
+</p>
+<p style="text-align: justify; background: white"><span lang="EN-US">
+
+
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<b><i>a</i></b> = <b><i>offset</i></b> - <b>S</b><sub><i>x</i></sub>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(3)
+<br/><br/>
+
+</p>
+
+<p style="text-align: justify; background: white"><span lang="EN-US">
+The following figure illustrates the above algorithm.
+</p>
+
+<!-- <p><img src="Article.gif" alt="Sample Image - maximum width is 600 pixels" width=400 height=200></p> -->
+<p><img border="0" src="MergeForPage.png" width="599" height="525"></p>
+
+<p style="text-align: justify; background: white"><span lang="EN-US">
+In the figure data are inserted to / remove from <i>z</i> Data Stores <i>0, 1, ..., z - 1</i>. 
+Objects in the Data Stores categorized in <i>n</i> buckets numbered <i>0, 1, ..., n - 1</i>.
+Red frame encompassing buckets between <b>x</b> and <b>y</b> defined by conditions (1) and (2) depicts content transferred to Aggregator.
+Reg rectangle Result shows final result page of <b><i>p</i></b> objects starting at object <b><i>a</i></b> of merged sorted list in Aggregator.
+Number <b><i>a</i></b> is calculated by (3). 
+</p>
+
+<h2>Sotfware Implementation</h2>
+
+<p style="text-align: justify; background: white"><span lang="EN-US">
+The algorithm is implemented in plain C# in assembly (dll) <i>AggregatedSortedPage</i>. The  assembly contains 
+interface <span style="color:#A31515">IDataStoreBucketsContainer&lt;T&gt;</span>, where 
+<span style="color:#A31515">T</span> is a type of the objects to be sorted, 
+and
+classes <span style="color:#A31515">DataStoreBucketsContainer&lt;T&gt;</span> (implementing the interface),
+<span style="color:#A31515">Aggregator</span> and
+<span style="color:#A31515">Query</span>.
+
+Interface <span style="color:#A31515">IDataStoreBucketsContainer&lt;T&gt;</span> 
+provides methods to get buckets 
+length 
+<span style="color:#A31515">GetBucketsLength()</span>
+and 
+content
+<span style="color:#A31515">GetBucketsContent()</span>.
+
+Class <span style="color:#A31515">DataStoreBucketsContainer&lt;T&gt;</span> implementing 
+interface <span style="color:#A31515">IDataStoreBucketsContainer&lt;T&gt;</span>, 
+dealls with real Data Store and contains buckets in its dictionary. It is also able to add / remove objects
+to / from its buckets.
+
+In order to get buckets length and content <span style="color:#A31515">Aggregator</span> has to call methods 
+of <span style="color:#A31515">IDataStoreBucketsContainer&lt;T&gt;</span> interface.
+
+If <span style="color:#A31515">Aggregator</span> and
+<span style="color:#A31515">DataStoreBucketsContainer&lt;T&gt;</span> 
+are located in the same process (like in our rather illustrative and not quite realistic sample)
+then <span style="color:#A31515">Aggregator</span> calls methods of 
+<span style="color:#A31515">DataStoreBucketsContainer&lt;T&gt;</span> directly.
+
+But in reality <span style="color:#A31515">Aggregator</span> queries Data Stores from different processes. 
+For that purpose appropriate proxy implementing 
+interface <span style="color:#A31515">IDataStoreBucketsContainer&lt;T&gt;</span> is required (not shown in this code sample).
+The proxy is capable to call methods of remote 
+<span style="color:#A31515">DataStoreBucketsContainer&lt;T&gt;</span> object from the 
+<span style="color:#A31515">Aggregator</span>'s process.
+Appropriate infrastructure should be provided in order to support these inter-process calls.
+</p>
+
+<p style="text-align: justify; background: white"><span lang="EN-US">
+<span style="color:#A31515">Aggregator</span> is a stateless static class. 
+Its the only public method 
+<span style="color:#A31515">GetPage&lt;T&gt;()</span> takes as parameter instance of 
+<span style="color:#A31515">IDataStoreBucketsContainer&lt;T&gt;</span> (either proxy or real
+<span style="color:#A31515">DataStoreBucketsContainer&lt;T&gt;</span>), 
+object implementing 
+<span style="color:#A31515">System.Collections.Generic.IComparer&lt;T&gt;</span> interface
+for comparison of <span style="color:#A31515">T</span> type objects in order to sort them, 
+and query object of 
+<span style="color:#A31515">Query</span> 
+type.
+</p>
+
+
+<p style="text-align: justify; background: white"><span lang="EN-US">
+Described above software does not impose any requirements on sortable objects of type <span style="color:#A31515">T</span>.
+Rules for distibution them to buckets, objects comparison and queries are separated from both 
+the objects' type and algorithm implementation. To serve query on each index (criterion)
+two outer entities should be provided, namely, 
+
+<li>
+method for categorizing objects by buckets (delegate of type 
+<span style="color:#A31515">System.Func&lt;T, int&gt;</span> as a parameter in constructor of 
+<span style="color:#A31515">DataStoreBucketsContainer&lt;T&gt;</span>), and 
+</li>
+<li>
+method for comparison of two objects (as implementation of 
+<span style="color:#A31515">System.Collections.Generic.IComparer&lt;T&gt;</span> interface as a parameter for static
+<span style="color:#A31515">Aggregator.GetPage&lt;T&gt;()</span> method). 
+</li>
+</p>
+
+<p style="text-align: justify; background: white"><span lang="EN-US">
+These metdods are used in different places since in real life classes 
+<span style="color:#A31515">DataStoreBucketsContainer&lt;T&gt;</span> and 
+<span style="color:#A31515">Aggregator</span> run in different processes.
+</p>
+
+<p style="text-align: justify; background: white"><span lang="EN-US">
+Class <span style="color:#A31515">DataStoreBucketsContainer&lt;T&gt;</span> provides method
+<span style="color:#A31515">GetInfo()</span> for its buckets inspection.
+It returns tuple containing list of length of each bucket in the Data Store, 
+average number of objects and ratio of buckets length to the average. 
+Although this method is not used for directly for the problem solution, it may be useful 
+to optimize bucket distribution rules.
+</p>
+
+<h2>Code Sample</h2>
+
+<p style="text-align: justify; background: white"><span lang="EN-US">
+In order to test assembly <i>AggregatedSortedPage</i>  console application <i>TestApp</i> is used.
+Class <span style="color:#A31515">Item</span> represents the sorting objects type. 
+It is sorted by alphabetic order of its public string property 
+<span style="color:#A31515">Word</span>. 
+Class <span style="color:#A31515">ComparerItem</span> contains both 
+method to categorized <span style="color:#A31515">Word</span> property 
+to buckets and to comparer two words implementing interface 
+<span style="color:#A31515">System.Collections.Generic.IComparer&lt;T&gt;</span>.
+The buckets roughly follow the first letter of a word although some letters 
+are combined to a single bucket where as some others are split to two buckets (in the latter case
+two leading letters are analyzed).
+</p>
+<p style="text-align: justify; background: white"><span lang="EN-US">
+Text file <i>t8.shakespeare.txt</i> containing all writings of William Shakespeare downloaded from 
+<a href="https://ocw.mit.edu/ans7870/6/6.006/s08/lecturenotes/files/t8.shakespeare.txt">here</a> 
+is used as words source with auxiliary symbols like commas, apostrophs, etc. removed.
+Only distinct words are taken for the test (no words duplications).
+Empty strings are also taken out of the list.
+After these modifications there are <i>29541</i> words remaining in the list.
+File should be downloaded and placed either in folder with <i>TestApp.exe</i>
+or in folder of <i>TestApp.csproj</i>. The file name in hardcoded in <i>Program.cs</i>
+(of course, any other large enough text file may be used for testing - just name should be changed in the code).
+To facilitate subsequent check for correctness of queries execution all items in the list were
+alphabetically sorted and their serial numbers and Data Stores were placed in their appropriate properties
+used for testing purposes and described below.
+</p>
+
+<p style="text-align: justify; background: white"><span lang="EN-US">
+Class <span style="color:#A31515">Item</span> has two auxiliary properties used only for testing purposes.
+Property <span style="color:#A31515">DataStore</span> indicates Data Store containing this item, and
+property <span style="color:#A31515">Num</span> presents serial number of the item in full sorted list 
+(i.e. list of all distinct words in the file sorted in alphabetic order).
+These two properties allow us effectively check result of our query execution. 
+Please note that in real life the properties are of no use.
+</p>
+
+<p style="text-align: justify; background: white"><span lang="EN-US">
+For test we equally devide all our words to three Data Stores and execute query with 
+<b><i>offset</i></b> = <i>15000</i> and
+<b><i>p</i></b> = <i>25</i>.
+This query is executed first for the set of words without change and then with a word adding to and removal from 
+one of the Data Stores. Results of query on unchanged words set is presented below (as you can see some of words
+spell incorrect since symbols like apostrophs were removed):
+</p>
+
+<pre style="font-family: 'Courier New', Courier, mono; white-space: pre; background-color: #FBEDBB">
+
+Data Stores Lists Aggregator
+
+start: 15000, num: 25
+
+COMBINED SERIAL NUM.   NUM. IN PAGE  DATA STORE   WORD
+     15000                  0            2        loaf
+     15001                  1            0        loam
+     15002                  2            1        loan
+     15003                  3            1        loath
+     15004                  4            2        loathd
+     15005                  5            0        loathe
+     15006                  6            1        loathed
+     15007                  7            0        loather
+     15008                  8            0        loathes
+     15009                  9            1        loathing
+     15010                  10            0        loathly
+     15011                  11            2        loathness
+     15012                  12            2        loathsome
+     15013                  13            1        loathsomeness
+     15014                  14            2        loathsomest
+     15015                  15            1        loaves
+     15016                  16            0        lob
+     15017                  17            2        lobbies
+     15018                  18            1        lobby
+     15019                  19            1        local
+     15020                  20            0        lochaber
+     15021                  21            0        lock
+     15022                  22            1        lockd
+     15023                  23            2        locked
+     15024                  24            0        locking
+	 
+</pre>	 
+
+<p style="text-align: justify; background: white"><span lang="EN-US">
+We got <i>COMBINED SERIAL NUM.</i> and  <i>DATA STORE</i> columns contents due to auxiliary properties of 
+<span style="color:#A31515">Item</span> class. From above result we see that our query was fulfilled correctly
+and words come from all Data Stores.
+</p>
+	 
+<h2>Discussion</h2>
+
+<p style="text-align: justify; background: white"><span lang="EN-US">
+To increase effectiveness of the algorithm each bucket should contain relatively small number of objects
+(of course, number of buckets should be reasonable). 
+This allows system to transfer less objects from Data Stores to Aggregator and 
+sort less objects by Aggregator for final combined list. 
+In the other hand, rules for objects distribution to buckets should be simple and inexpensive to reduce 
+calculation and locking time in case of objects massive adding.  
+</p>
+
+<span id="intelliTXT">
+<p class="MsoNormal" style="text-align:justify;direction:ltr;unicode-bidi:embed">
+<span lang="EN-US" style="font-size: 10.0pt; line-height: 115%; font-family: Verdana">
+</span>
+</p>
+
+<h2>Thanks</h2>
+
+<p style="text-align: justify; background: white"><span lang="EN-US">
+I'd like to thank Shlomi Levy for the problem statement and useful discussion on the subject.
+</p>
+
+
+
+</div>
+<p>&nbsp;</body></html>
