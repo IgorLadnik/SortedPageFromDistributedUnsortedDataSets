@@ -2,7 +2,7 @@
 
 **Author:** Igor Ladnik ([email](mailto:ladnik@hotmail.com)).
 
-This is a .NET 10 modernization of the original bucket-based paging example. The [original HTML article](docs/Sorted%20Page%20from%20Unsorted%20Distributed%20Data.html) and [diagram](docs/MergeForPage.png) remain historical references; their .NET Framework build details, page-bound formula, and description of the current API are outdated. The original article declares **CPOL**. This repository does not replace or invent a license declaration.
+This is a .NET 10 modernization of the original bucket-based paging example. The original article was published on CodeProject on **12 March 2018**; its CodeProject page is no longer active. The [original HTML article](docs/Sorted%20Page%20from%20Unsorted%20Distributed%20Data.html) and [diagram](docs/MergeForPage.png) remain historical references; their .NET Framework build details, page-bound formula, and description of the current API are outdated. The original article declares **CPOL**. This repository does not replace or invent a license declaration.
 
 ## Repository and build instructions
 
