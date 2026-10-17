@@ -4,25 +4,40 @@
 
 This is a .NET 10 modernization of the original bucket-based paging example. The [original HTML article](docs/Sorted%20Page%20from%20Unsorted%20Distributed%20Data.html) and [diagram](docs/MergeForPage.png) remain historical references; their .NET Framework build details, page-bound formula, and description of the current API are outdated. The original article declares **CPOL**. This repository does not replace or invent a license declaration.
 
-## Build and run
+## Repository and build instructions
 
-Install the .NET 10 SDK and a Visual Studio release that supports .NET 10 (Visual Studio 2026 or newer). Both projects use stable C# 14 with nullable reference analysis enabled. From the repository root:
+### Prerequisites
+
+Install the **.NET 10 SDK**. To work in Visual Studio, use **Visual Studio 2026 version 18.0 or newer** with .NET development support. The library and console projects target `net10.0`, compile with stable C# 14 and nullable reference analysis, and need no third-party NuGet packages. The SDK-style projects preserve their original assembly metadata through the existing `AssemblyInfo.cs` files. Open `MergeForPage.sln` in Visual Studio and select `TestApp` as the startup project.
+
+### Repository layout
+
+- `MergeForPage.sln`: solution containing the library and console demo.
+- `AggregatedSortedPage/`: bucket container, store interface, and page aggregator.
+- `TestApp/`: console demo and `t8.shakespeare.txt` input file.
+- `docs/`: historical HTML article and diagram.
+
+### Restore, build, and run
+
+Run these commands from the repository root:
 
 ```powershell
 dotnet restore MergeForPage.sln
-dotnet build MergeForPage.sln -c Release --no-restore
+dotnet build MergeForPage.sln --configuration Release --no-restore
 dotnet TestApp/bin/Release/net10.0/TestApp.dll
+```
+
+The demo can also read a text file you supply:
+
+```powershell
 dotnet TestApp/bin/Release/net10.0/TestApp.dll "C:\data\my-text.txt"
 ```
 
-The last command is optional. It reads the supplied text file; a missing path or a file without words produces an error and nonzero exit code. The default run uses `TestApp/t8.shakespeare.txt`, copied to the output directory. This file came from the original author's archived sample zip in Dropbox. Its header identifies a World Library copyrighted electronic edition and restricts redistribution to personal, noncommercial use; retain and review that notice before redistributing the data. The demo resolves it from the application directory, independent of the working directory. It removes the original sample's punctuation and digits, splits on spaces, and uses distinct lowercase words beginning with ASCII letters. It tests an offset of 15000 when the input is large enough. The demo queries a page spanning multiple buckets, inserts and removes an item, prints each result page with global index, page index, store, and word, and checks each page against a full-sort baseline. It exits nonzero on failure and does not wait for keyboard input.
+The default input is `TestApp/t8.shakespeare.txt`, copied beside the built DLL. The demo locates that copy through the application directory, so the current working directory does not affect input lookup. A missing file or one without usable words produces an error and a nonzero exit code. The program does not wait for keyboard input.
 
-Repository layout:
+The demo removes the original sample's punctuation and digits, splits on spaces, and uses distinct lowercase words beginning with ASCII letters. It requests 25 items at offset 15000 when the dataset is large enough, checks a page crossing a bucket boundary, then queries after insertion and removal. Each result page is printed with global index, page index, store, and word. Every page is compared with a full-sort baseline; a mismatch exits nonzero. The solution currently has no automated test project, as requested.
 
-- `AggregatedSortedPage/`: generic bucket container, interface, and aggregator.
-- `TestApp/`: console demonstration and original Shakespeare sample.
-- `docs/`: historical article and diagram.
-- `MergeForPage.sln`: Visual Studio solution.
+The Shakespeare file came from the original author's archived sample zip in Dropbox. Its header identifies a World Library copyrighted electronic edition and restricts redistribution to personal, noncommercial use. Retain and review that notice before redistributing the data.
 
 ## API and ordering
 
