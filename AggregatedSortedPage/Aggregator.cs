@@ -1,194 +1,107 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
-using System.Threading.Tasks;
 
-namespace AggregatedSortedPage
+namespace AggregatedSortedPage;
+
+/// <summary>
+/// For included a and b, Bucket(a) &lt; Bucket(b) must imply comparer.Compare(a, b) &lt;= 0.
+/// Concurrent updates across the two query phases require external coordination.
+/// </summary>
+public static class Aggregator
 {
-    public static class Aggregator
+    public static T[] GetPage<T>(IList<IDataStoreBucketsContainer<T>> dataStoreProxies,
+        IComparer<T> comparerT, Query query)
     {
-        #region Public Aggregation Methods
+        ArgumentNullException.ThrowIfNull(dataStoreProxies);
+        ArgumentNullException.ThrowIfNull(comparerT);
+        ArgumentNullException.ThrowIfNull(query);
+        if (query.Length <= 0)
+            throw new ArgumentOutOfRangeException(nameof(query), "Page length must be positive.");
+        if (!int.TryParse(query.Filter, NumberStyles.None, CultureInfo.InvariantCulture, out int offset))
+            throw new ArgumentException("Filter must be a nonnegative Int32 decimal offset.", nameof(query));
 
-        // Get Page Method
-        public static T[] GetPage<T>(IList<IDataStoreBucketsContainer<T>> dataStoreProxies, IComparer<T> comparerT, Query query)
+        var counts = new SortedDictionary<int, long>();
+        foreach (var store in dataStoreProxies)
         {
-            if (query == null || string.IsNullOrEmpty(query.Filter) || query.Length < 1)
-                return Empty<T>();
-
-            Tuple<int, int, int> tuple = null;
-
-            int num = query.Length;
-            int start = -1;
-            if (int.TryParse(query.Filter, out start) && start > -1)
-                // Process query of type (start, num)
-                tuple = GetBeginEndOffset(dataStoreProxies, start, num);
-            else
-                // Process different types of query - not implemented yet
-                tuple = GetBeginEndOffset(dataStoreProxies, string.Empty, num);
-
-            return tuple != null && tuple.Item1 > 0 && tuple.Item2 > 0 && tuple.Item3 > 0
-                        ? GetResult(dataStoreProxies, comparerT, 
-                                            beginBucket: tuple.Item1, 
-                                            endBucket:   tuple.Item2, 
-                                            offset:      tuple.Item3, 
-                                            num: num) 
-                        : Empty<T>();
-        }
-
-        #endregion // Public Aggregation Methods
-
-        #region Private Methods
-
-        // Method for query (start, num).
-        private static Tuple<int, int, int> GetBeginEndOffset<T>(IList<IDataStoreBucketsContainer<T>> dadaStoreProxies, int start, int num)
-        {
-            int numOfDataStored = dadaStoreProxies.Count();
-
-            // Tuple<Dictionary<int, int>, int> - for each Data Store
-            //    (bucket -> num. of items in this bucket)
-            //    total num. of items in all buckets.
-            var callbacksGetBucketLengths = new Func<Tuple<Dictionary<int, int>, int>>[numOfDataStored];
-            for (int i = 0; i < numOfDataStored; i++)
-                callbacksGetBucketLengths[i] = dadaStoreProxies[i].GetBucketsLength;
-
-            // Parallel call for all Data Stores to get number of items in each bucket and 
-            //    total nuber of items in each Data Store.
-            var lstTuple = GetAggregatedList(callbacksGetBucketLengths);
-
-            // Calculate combined number of items for each bucket in all Data Stores "dctBucketCounts"
-            //    total number of items n all Data Stores.
-            var dctBucketCounts = new Dictionary<int, int>();
-            var arrTuple = lstTuple.ToArray();
-            int total = 0;
-            for (int i = 0; i < dadaStoreProxies.Count(); i++)
+            if (store is null)
+                throw new ArgumentException("Stores cannot contain null entries.", nameof(dataStoreProxies));
+            var snapshot = store.GetBucketsLength();
+            if (snapshot is null || snapshot.Item1 is null || snapshot.Item2 < 0)
+                throw new InvalidOperationException("A store returned invalid bucket counts.");
+            long storeTotal = 0;
+            foreach (var (key, count) in snapshot.Item1)
             {
-                var tuple = arrTuple[i];
-                total += tuple.Item2;
-
-                var dct = tuple.Item1;
-                foreach (var key in dct.Keys)
-                {
-                    if (!dctBucketCounts.ContainsKey(key))
-                        dctBucketCounts[key] = 0;
-
-                    dctBucketCounts[key] += dct[key];
-                }
+                if (count < 0)
+                    throw new InvalidOperationException("A store returned a negative bucket count.");
+                storeTotal = checked(storeTotal + count);
+                if (key >= 0)
+                    counts[key] = checked(counts.GetValueOrDefault(key) + count);
             }
+            if (storeTotal != snapshot.Item2)
+                throw new InvalidOperationException("Store total differs from its bucket counts.");
+        }
 
-            // Determine required buckets range according to query "beginBucket" and "endBucket".
-            //    "offset" indicates number of slipped items after final sorting and aggregation.
-            int prevCount = 0;
-            int count = 0;
-            int offset = 0;
-            int numOfBuckets = dctBucketCounts.Keys.Count;
-            var orderedKeys = dctBucketCounts.Keys.OrderBy(k => k).ToArray();
-            int begin = -1;
-            int end = -1;
-            for (int i = 0; i < orderedKeys.Length; i++)
+        long cumulative = 0;
+        int? first = null;
+        int? last = null;
+        long localOffset = 0;
+        long lastRequestedIndex = (long)offset + query.Length - 1;
+        foreach (var (key, count) in counts)
+        {
+            long previous = cumulative;
+            cumulative = checked(cumulative + count);
+            if (first is null && cumulative > offset)
             {
-                prevCount = count;
-                count += dctBucketCounts[orderedKeys[i]];
-
-                if (count >= start && begin == -1)
-                {
-                    begin = i;
-                    offset = start - prevCount;
-                }
-
-                if (count >= start + num && end == -1)
-                {
-                    end = i;
-                    break;
-                }
+                first = key;
+                localOffset = offset - previous;
             }
-
-            if (begin >= 0)
+            if (first is not null && cumulative > lastRequestedIndex)
             {
-                if (end == -1)
-                    end = orderedKeys.Length - 1;
+                last = key;
+                break;
             }
-            else
-                return null;
-
-            return new Tuple<int, int, int>(/*beginBucket*/ orderedKeys[begin], /*endBucket*/ orderedKeys[end], offset);
         }
+        if (first is null)
+            return [];
+        last ??= counts.Last(pair => pair.Value > 0).Key;
 
-        // Method for query (filterRule, num) - not implemented yet
-        private static Tuple<int, int, int> GetBeginEndOffset<T>(
-                    IList<IDataStoreBucketsContainer<T>> dataStoreProxies, string filterRule, int num)
+        var selected = new SortedDictionary<int, List<T>>();
+        foreach (var store in dataStoreProxies)
         {
-            return new Tuple<int, int, int>(-1, -1, -1);
+            foreach (var (key, items) in store.GetBucketsContent(first.Value, last.Value))
+            {
+                if (key < first || key > last || items is null)
+                    throw new InvalidOperationException("A store returned invalid bucket content.");
+                if (!selected.TryGetValue(key, out var aggregate))
+                    selected[key] = aggregate = [];
+                aggregate.AddRange(items);
+            }
         }
 
-        private static T[] GetResult<T>(IList<IDataStoreBucketsContainer<T>> dataStoreProxies, IComparer<T> comparerT, 
-                                        int beginBucket, int endBucket, int offset, int num)
+        var result = new List<T>();
+        long toSkip = localOffset;
+        foreach (var (_, items) in selected)
         {
-            int numOfDataStores = dataStoreProxies.Count();
-
-            var callbacksGetBucketsContent = new Func<int, int, Dictionary<int, List<T>>>[numOfDataStores];
-            for (int i = 0; i < numOfDataStores; i++)
-                callbacksGetBucketsContent[i] = dataStoreProxies[i].GetBucketsContent;
-
-            // Parallel call for all Data Stores to get content of buckets between "beginBucket" and  "endBucket".
-            var lstView = GetAggregatedList(null, callbacksGetBucketsContent, beginBucket, endBucket);
-
-            // Aggregate content of selected bucket from all Data Stores.
-            var dctItem = new Dictionary<int, List<T>>(); // bucket -> aggregated content from all Data Stores
-            foreach (var dct in lstView)
-                foreach (var key in dct.Keys)
-                {
-                    if (!dctItem.ContainsKey(key))
-                        dctItem[key] = new List<T>();
-
-                    dctItem[key].AddRange(dct[key]);
-                }
-
-            // Final data aggeregation: first sort in each bucket and then finally unite their content. 
-            var lstItem = new List<T>();
-            Parallel.ForEach(dctItem.Keys.OrderBy(key => key),
-                             key => lstItem.AddRange(dctItem[key].OrderBy(item => item, comparerT)));
-
-            // Cut out required page from sorted list.
-            return SubArray(lstItem.ToArray(), offset, num);
+            items.Sort(comparerT);
+            foreach (var item in items)
+            {
+                if (toSkip > 0)
+                    toSkip--;
+                else if (result.Count < query.Length)
+                    result.Add(item);
+                else
+                    return result.ToArray();
+            }
         }
-
-        private static IList<T> GetAggregatedList<T>(Func<T>[] callbacks, 
-                                                     Func<int, int, T>[] callbacksWithParams = null,
-                                                            int beginBucket = -1, int endBucket = -1)
-        {
-            int numOfDataSores = callbacksWithParams == null ? callbacks.Length : callbacksWithParams.Length;
-            var lsts = new List<T>[numOfDataSores];
-            for (int i = 0; i < numOfDataSores; i++)
-                lsts[i] = new List<T>();
-
-            Parallel.For(0, numOfDataSores, i => lsts[i].Add(callbacksWithParams == null
-                                ? callbacks[i]()
-                                : callbacksWithParams[i](beginBucket, endBucket)));
-
-            var lstRet = new List<T>();
-            for (int i = 0; i < numOfDataSores; i++)
-                lstRet.AddRange(lsts[i]);
-
-            return lstRet;
-        }
-
-        private static T[] SubArray<T>(IList<T> data, int offset, int length)
-        {
-            if (data.Count - offset <= 0)
-                return new T[0];
-
-            int a = data.Count - offset;
-            return data.Skip(offset).Take(a > length ? length : a).ToArray();
-        }
-
-        private static T[] Empty<T>() { return new T[0]; }
-
-        #endregion // Private Methods
+        return result.ToArray();
     }
+}
 
-    public class Query
-    {
-        public string Filter { get; set; }
-        public int Length { get; set; }
-    }
+public class Query
+{
+    /// <summary>Zero-based nonnegative Int32 offset in invariant decimal notation.</summary>
+    public string? Filter { get; set; }
+    public int Length { get; set; }
 }

@@ -1,148 +1,113 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 
-namespace AggregatedSortedPage
+namespace AggregatedSortedPage;
+
+public interface IDataStoreBucketsContainer<T>
 {
-    #region Interface for buckets container on each Data Store
+    Tuple<Dictionary<int, int>, int> GetBucketsLength();
+    Dictionary<int, List<T>> GetBucketsContent(int beginBucket, int endBucket);
+}
 
-    // Interface implemented by real class containing items
-    //    and by its proxy running in Aggregator
-    public interface IDataStoreBucketsContainer<T>
+/// <summary>
+/// Negative bucket keys exclude items. An item's sort key and bucket assignment must not
+/// change while stored; remove and reinsert it. Returned lists copy membership, not T objects.
+/// </summary>
+public class DataStoreBucketsContainer<T> : IDataStoreBucketsContainer<T>
+{
+    private static long nextLockId;
+    private readonly long lockId = Interlocked.Increment(ref nextLockId);
+    private readonly Lock locker = new();
+    private readonly Dictionary<int, List<T>> buckets = [];
+    private readonly Func<T, int> determineBucket;
+
+    public DataStoreBucketsContainer(IEnumerable<T> items, Func<T, int> determineItemBucket)
     {
-        Tuple<Dictionary<int, int>, int> GetBucketsLength();
-        Dictionary<int, List<T>> GetBucketsContent(int beginBucket, int endBucket);
+        ArgumentNullException.ThrowIfNull(items);
+        determineBucket = determineItemBucket ?? throw new ArgumentNullException(nameof(determineItemBucket));
+        foreach (var item in items)
+            AddItem(item);
     }
 
-    #endregion // Interface for buckets container on each Data Store
-
-    #region Class for buckets container on each Data Store
-
-    // Items container for a Data Store
-    public class DataStoreBucketsContainer<T> : IDataStoreBucketsContainer<T>
+    public Tuple<Dictionary<int, int>, int> GetBucketsLength()
     {
-        // Bucket distribution
-        private IDictionary<int, List<T>> dctBucket = new Dictionary<int, List<T>>();
-
-        private object locker = new object();
-
-        // Determine bucket for give item
-        private Func<T, int> dlgtDetermineItemBucket;
-        
-        // Ctor
-        public DataStoreBucketsContainer(IEnumerable<T> items, Func<T, int> dlgtDetermineItemBucket)
+        lock (locker)
         {
-            this.dlgtDetermineItemBucket = dlgtDetermineItemBucket;
-
-            if (items != null)
-                foreach (var item in items)
-                    PlaceItemToBucket(item);
+            var counts = buckets.ToDictionary(pair => pair.Key, pair => pair.Value.Count);
+            int total = checked(counts.Values.Sum());
+            return Tuple.Create(counts, total);
         }
-
-        #region IDataStoreBucketsContainer<T> Methods
-
-        // Method of the interface. Return number of item in each bucket and
-        //    total number of items in the Data Store
-        public Tuple<Dictionary<int, int>, int> GetBucketsLength()
-        {
-            int total = 0;
-            var dctBucketCounts = new Dictionary<int, int>();
-
-            lock (locker)
-            {
-                foreach (var key in dctBucket.Keys)
-                {
-                    int n = dctBucket[key].Count;
-
-                    if (!dctBucketCounts.ContainsKey(key))
-                        dctBucketCounts[key] = 0;
-
-                    dctBucketCounts[key] += n;
-
-                    total += n;
-                }
-            }
-
-            return new Tuple<Dictionary<int, int>, int>(dctBucketCounts, total);
-        }
-
-        // Method of the interface. Return lists for bucket range
-        //    between "beginBucket" and "endBucket"
-        public Dictionary<int, List<T>> GetBucketsContent(int beginBucket, int endBucket)
-        {
-            var dct = new Dictionary<int, List<T>>();
-
-            lock (locker)
-            {
-                foreach (var k in dctBucket.Keys.Where(key => key >= beginBucket && key <= endBucket))
-                    dct[k] = dctBucket[k];
-            }
-
-            return dct;
-        }
-
-        #endregion // IDataStoreBucketsContainer<T> Methods
-
-        #region Public Add / Renmove item
-
-        public void AddItem(T item)
-        {
-            lock (locker)
-                PlaceItemToBucket(item);
-        }
-
-        public void RemoveItem(T item)
-        {
-            lock (locker)
-                RemoveItemFromBucket(item);
-        }
-
-        #endregion // Public Add / Renmove item
-
-        #region Aux. - Buckets info
-
-        public Tuple<IList<int>, float, IList<float>> GetInfo()
-        {
-            var tuple = GetBucketsLength();
-            float avr = (float)tuple.Item2 / tuple.Item1.Keys.Count();
-
-            var lstSize = new List<int>();
-            var lstOverAvr = new List<float>();
-            foreach (var key in tuple.Item1.Keys.OrderBy(key => key))
-            {
-                int n = tuple.Item1[key];
-                lstSize.Add(n);
-                lstOverAvr.Add(n / avr);
-            }
-                         
-            return new Tuple<IList<int>, float, IList<float>>(lstSize, avr, lstOverAvr);
-        }
-
-        #endregion // Aux. - Buckets info
-
-        #region Private Methods
-
-        private void PlaceItemToBucket(T item)
-        {
-            int bucket = dlgtDetermineItemBucket(item);
-            if (bucket > -1)
-            {
-                if (!dctBucket.ContainsKey(bucket))
-                    dctBucket[bucket] = new List<T>();
-
-                dctBucket[bucket].Add(item);
-            }
-        }
-
-        private void RemoveItemFromBucket(T item)
-        {
-            int bucket = dlgtDetermineItemBucket(item);
-            if (bucket > -1)
-                dctBucket[bucket].Remove(item);
-        }
-
-        #endregion // Private Methods
     }
 
-    #endregion // Class for buckets container on each Data Store
+    public Dictionary<int, List<T>> GetBucketsContent(int beginBucket, int endBucket)
+    {
+        lock (locker)
+            return buckets.Where(pair => pair.Key >= beginBucket && pair.Key <= endBucket)
+                .ToDictionary(pair => pair.Key, pair => new List<T>(pair.Value));
+    }
+
+    public void AddItem(T item)
+    {
+        lock (locker)
+        {
+            int bucket = determineBucket(item);
+            if (bucket < 0)
+                return;
+            if (!buckets.TryGetValue(bucket, out var items))
+                buckets[bucket] = items = [];
+            items.Add(item);
+        }
+    }
+
+    public void RemoveItem(T item)
+    {
+        lock (locker)
+        {
+            int bucket = determineBucket(item);
+            if (bucket >= 0 && buckets.TryGetValue(bucket, out var items))
+                items.Remove(item);
+        }
+    }
+
+    public Tuple<IList<int>, float, IList<float>> GetInfo()
+    {
+        var snapshot = GetBucketsLength();
+        var sizes = snapshot.Item1.OrderBy(pair => pair.Key).Select(pair => pair.Value).ToList();
+        float average = sizes.Count == 0 ? 0 : (float)snapshot.Item2 / sizes.Count;
+        IList<float> ratios = sizes.Select(size => average == 0 ? 0 : size / average).ToList();
+        return Tuple.Create<IList<int>, float, IList<float>>(sizes, average, ratios);
+    }
+
+    /// <summary>
+    /// Hold all supplied in-process store locks across both query phases. AddItem and
+    /// RemoveItem use these locks. Locks follow creation order and release in reverse.
+    /// All relevant stores must participate; remote stores need external coordination.
+    /// </summary>
+    public static TResult WithAllLocked<TResult>(IEnumerable<DataStoreBucketsContainer<T>> stores,
+        Func<TResult> operation)
+    {
+        ArgumentNullException.ThrowIfNull(stores);
+        ArgumentNullException.ThrowIfNull(operation);
+        var ordered = stores.ToArray();
+        if (ordered.Any(store => store is null))
+            throw new ArgumentException("Stores cannot contain null entries.", nameof(stores));
+        ordered = ordered.Distinct().OrderBy(store => store.lockId).ToArray();
+        int acquired = 0;
+        try
+        {
+            foreach (var store in ordered)
+            {
+                store.locker.Enter();
+                acquired++;
+            }
+            return operation();
+        }
+        finally
+        {
+            for (int i = acquired - 1; i >= 0; i--)
+                ordered[i].locker.Exit();
+        }
+    }
 }

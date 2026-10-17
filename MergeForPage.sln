@@ -1,11 +1,11 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio 14
-VisualStudioVersion = 14.0.25420.1
+# Visual Studio Version 18
+VisualStudioVersion = 18.0.0.0
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AggregatedSortedPage", "AggregatedSortedPage\AggregatedSortedPage.csproj", "{8622F167-DD0A-486F-B94C-B71E1210EADB}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "AggregatedSortedPage", "AggregatedSortedPage\AggregatedSortedPage.csproj", "{8622F167-DD0A-486F-B94C-B71E1210EADB}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TestApp", "TestApp\TestApp.csproj", "{FB5F2462-0E01-46E5-A51B-1A5549117600}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "TestApp", "TestApp\TestApp.csproj", "{FB5F2462-0E01-46E5-A51B-1A5549117600}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

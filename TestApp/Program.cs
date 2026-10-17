@@ -1,195 +1,101 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.IO;
+using System.Linq;
 using AggregatedSortedPage;
 
-namespace MergeForPaging
+namespace MergeForPaging;
+
+public static class Program
 {
-    public class Program
+    public static int Main(string[] args)
     {
-        // Hardcoded for the test
-        const string textFileName = "t8.shakespeare.txt";
-        const int numOfDataStores = 3;
-
-        static IList<IDataStoreBucketsContainer<Item>> dataStoreContainers = new List<IDataStoreBucketsContainer<Item>>();
-
-        static void Main(string[] args)
+        if (args.Length > 1)
         {
-            // Test query conditions - hardcoded for the test
-            const int start = 15000;
-            const int num = 25;
-
-            Console.WriteLine($"Data Stores Lists Aggregator\n\nstart: {start}, num: {num}\n");
-
-            // Data preparation
-            if (!Init())
+            Console.Error.WriteLine("Usage: TestApp [path-to-text-file]");
+            return 2;
+        }
+        string path = args.Length == 1 ? Path.GetFullPath(args[0]) :
+            Path.Combine(AppContext.BaseDirectory, "t8.shakespeare.txt");
+        if (!File.Exists(path))
+        {
+            Console.Error.WriteLine($"Input file not found: {path}");
+            return 2;
+        }
+        try
+        {
+            // Match the original sample's symbol removal and space splitting.
+            string cleaned = File.ReadAllText(path).ToLowerInvariant();
+            const string removedCharacters = ".,\n\r\"'!?()*_-[]&><0123456789{}~:;\\";
+            foreach (char symbol in removedCharacters)
+                cleaned = cleaned.Replace(symbol.ToString(), "");
+            var words = cleaned.Split(' ').Where(word => word.Length > 0 &&
+                word[0] >= 'a' && word[0] <= 'z').ToList();
+            if (words.Count == 0)
             {
-                PressAnyKeyToQuit();
-                return;
+                Console.Error.WriteLine($"No lowercase ASCII words found in {path}");
+                return 2;
             }
 
-            // Optional - Evaluate buckets size
-            var lstTuple = new List<Tuple<IList<int>, float, IList<float>>>();
-            for (int i = 0; i < dataStoreContainers.Count; i++)
-                lstTuple.Add((dataStoreContainers[i] as DataStoreBucketsContainer<Item>).GetInfo());
-
-            // Create test query
-            var query = new Query { Filter = $"{start}", Length = num };
-
-            Item itemToRemove = null;
-
-            for (int i = 0; i < 3; i++)
+            var all = words.Distinct(StringComparer.Ordinal).Select((word, index) => new Item
             {
-                switch (i)
-                {
-                    case 1:
-                        // Item will be added to the 2nd Data Store container (Data Store = 1)
-                        int dataStore = 1;
-                        (dataStoreContainers[dataStore] as DataStoreBucketsContainer<Item>).AddItem(
-                                    new Item { Word = $"{itemToRemove.Word}__***", Num = -start / 10, DataStore = dataStore });
-                        break;
+                Word = word,
+                DataStore = index % 3
+            }).ToList();
+            var stores = Enumerable.Range(0, 3)
+                .Select(index => new DataStoreBucketsContainer<Item>(
+                    all.Where(item => item.DataStore == index), ComparerItem.DetermineItemBucket))
+                .ToArray();
+            IList<IDataStoreBucketsContainer<Item>> proxies = stores.Cast<IDataStoreBucketsContainer<Item>>().ToList();
+            var comparer = new ComparerItem();
+            int offset = Math.Min(15000, Math.Max(0, all.Count - 1));
+            var sorted = all.OrderBy(item => item, comparer).ToArray();
+            int boundary = Enumerable.Range(1, sorted.Length - 1)
+                .FirstOrDefault(index => ComparerItem.DetermineItemBucket(sorted[index - 1]) !=
+                                         ComparerItem.DetermineItemBucket(sorted[index]));
+            if (boundary == 0)
+            {
+                Console.Error.WriteLine("The input needs words in at least two buckets.");
+                return 2;
+            }
+            if (!Check("initial page", offset, 25) ||
+                !Check("page spanning buckets", Math.Max(0, boundary - 2), 5))
+                return 1;
 
-                    case 2:
-                        // Item removal
-                        foreach (var daraStoreContainer in dataStoreContainers)
-                            (daraStoreContainer as DataStoreBucketsContainer<Item>).RemoveItem(itemToRemove);
-                        break;
-                }
+            var inserted = new Item { Word = "blueberry", DataStore = 1 };
+            stores[1].AddItem(inserted);
+            all.Add(inserted);
+            if (!Check("after insertion", offset, 25))
+                return 1;
 
-                // Test Call
-                var items = Aggregator.GetPage(dataStoreContainers, new ComparerItem(), query);
+            var removed = all[0];
+            stores[removed.DataStore].RemoveItem(removed);
+            all.Remove(removed);
+            if (!Check("after removal", offset, 25))
+                return 1;
+            Console.WriteLine("All demo pages match the full-sort baseline.");
+            return 0;
 
-                // The 2nd item (#1) from result list is to be removed
-                itemToRemove = items[1];
-
-                Console.WriteLine("Combined Serial Num.   Num. in Page  Data Store   Word".ToUpper());
-                int j = 0;
-                foreach (var item in items)
-                    Console.WriteLine($"     {item.Num}                  {j++}            {item.DataStore}        {item.Word}");
-
+            bool Check(string label, int start, int length)
+            {
+                var actual = DataStoreBucketsContainer<Item>.WithAllLocked(stores,
+                    () => Aggregator.GetPage(proxies, comparer,
+                        new Query { Filter = start.ToString(System.Globalization.CultureInfo.InvariantCulture), Length = length }));
+                var expected = all.OrderBy(item => item, comparer).Skip(start).Take(length).ToArray();
+                // Equal words can exchange positions, so compare their sorted keys.
+                bool equal = actual.Select(item => item.Word).SequenceEqual(expected.Select(item => item.Word));
+                Console.WriteLine($"{label}: offset={start}, returned={actual.Length}: {(equal ? "PASS" : "FAIL")}");
+                Console.WriteLine("Global index  Page index  Store  Word");
+                for (int index = 0; index < actual.Length; index++)
+                    Console.WriteLine($"{(long)start + index,12}  {index,10}  {actual[index].DataStore,5}  {actual[index].Word}");
                 Console.WriteLine();
+                return equal;
             }
-
-            PressAnyKeyToQuit();
         }
-
-        // Method for data preparation
-        static bool Init()
+        catch (Exception exception)
         {
-            string currentDir = Directory.GetCurrentDirectory();
-            var path = Path.Combine(currentDir, textFileName);
-            if (!File.Exists(path))
-                path = Path.Combine(currentDir, @"..\..\", textFileName);
-
-            if (!File.Exists(path))
-            {
-                Console.WriteLine($"\nERROR: Test file \"{textFileName}\" not found.");
-                return false;
-            }
-
-            var lst = new List<string>();
-            lst.AddRange(File.ReadAllText(path).ToLower() // all letters are converted to lower ones
-                                // The following chars are removed from text and text split by blanks to words
-                                .Replace(".", "")
-                                .Replace(",", "")
-                                .Replace("\n", "")
-                                .Replace("\r", "")
-                                .Replace("\"", "")
-                                .Replace("'", "")
-                                .Replace("!", "")
-                                .Replace("?", "")
-                                .Replace("(", "")
-                                .Replace(")", "")
-                                .Replace("*", "")
-                                .Replace("_", "")
-                                .Replace("-", "")
-                                .Replace("[", "")
-                                .Replace("]", "")
-                                .Replace("&", "")
-                                .Replace(">", "")
-                                .Replace("<", "")
-                                .Replace("0", "")
-                                .Replace("1", "")
-                                .Replace("2", "")
-                                .Replace("3", "")
-                                .Replace("4", "")
-                                .Replace("5", "")
-                                .Replace("6", "")
-                                .Replace("7", "")
-                                .Replace("8", "")
-                                .Replace("9", "")
-                                .Replace("{", "")
-                                .Replace("}", "")
-                                .Replace("~", "")
-                                .Replace(":", "")
-                                .Replace(";", "")
-                                .Replace("\\", "")
-                                .Split(' '));
-            
-            // Only distinct words starting with letter are considered
-            var words = lst.Distinct().Where(w => !string.IsNullOrEmpty(w) && w[0] >= 'a' && w[0] <= 'z').ToArray();
-
-            // Data Store containers: Dictionary<dataStore, list of items>
-            var dctDataStores = new Dictionary<int, List<Item>>();
-
-            // List of all words
-            var lstWords = new List<Item>();
-
-            // Create items and distribute them among Data Store containers
-            for (int i = 0; i < words.Length; i++)
-            {
-                var item = new Item { Word = words[i] };
-                lstWords.Add(item);
-
-                int keyDataStore = i % numOfDataStores;
-                if (!dctDataStores.ContainsKey(keyDataStore))
-                    dctDataStores[keyDataStore] = new List<Item>();
-
-                item.DataStore = keyDataStore;
-                dctDataStores[keyDataStore].Add(item);
-            }
-
-            // Distribute items by buckets in each Data Store container
-            for (int i = 0; i < numOfDataStores; i++)
-                dataStoreContainers.Add(new DataStoreBucketsContainer<Item>(dctDataStores[i], item => ComparerItem.DetermineItemBucket(item)));
-
-            // Sort the entire array in lexigraphics order of "Str" members and
-            //    assign set item's serial number to "Num" member.
-            int k = 0;
-            var sortedTotalList = lstWords.OrderBy(item => item.Word).ToList();
-            foreach (var item in sortedTotalList)
-                item.Num = k++;
-
-            var theLast = sortedTotalList.Last();
-
-            return true;
-        }
-
-        static void PressAnyKeyToQuit()
-        {
-            Console.WriteLine("\nPress any key to quit...");
-            Console.ReadKey();
+            Console.Error.WriteLine($"Demo failed: {exception.Message}");
+            return 1;
         }
     }
-
-    //#region Proxy class for buckets container on each Data Store
-
-    //// Stub for proxy class
-    //public class DataStoreBucketsContainerProxy<T> : IDataStoreBucketsContainer<T>
-    //{
-    //    // Call appropriate method or real class remotely
-    //    public Tuple<Dictionary<int, int>, int> GetBucketsLength()
-    //    {
-    //        return null;
-    //    }
-
-    //    // Call appropriate method or real class remotely
-    //    public Dictionary<int, List<T>> GetBucketsContent(int beginBucket, int endBucket)
-    //    {
-    //        return null;
-    //    }
-    //}
-
-    //#endregion // Proxy class for buckets container on each Data Store
 }
